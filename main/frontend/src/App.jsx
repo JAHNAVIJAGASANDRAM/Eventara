@@ -1,17 +1,31 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
 import './App.css'
 import "./index.css";
+import EventCard from './components/EventCard';
+import AnalyticsCard from './components/AnalyticsCard';
+import EventForm from './components/EventForm';
+import Navbar from './components/Navbar';
+import Hero from './components/Hero';
+
 
 function App() {
   const [count, setCount] = useState(0)
 
   return (
     <>
-      <div className="bg-blue-500 text-white p-8 text-center h-32 w-full">
-      Tailwind is working! 🎉
-    </div>
+      <div className="min-h-screen flex flex-col">
+      {/* Navbar */}
+      <Navbar />
+
+      {/* Hero Section */}
+      <Hero />
+      {/*Analytics Cards */}
+      <AnalyticsCard/>
+      {/*Event Cards */}
+      <EventCard/>
+      {/*Event Form */}
+      <EventForm/>
+      </div>
         
     </>
   )
