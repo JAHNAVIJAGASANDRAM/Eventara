@@ -2,9 +2,9 @@ import React from "react";
 
 export default function AnalyticsCard({ title, value }) {
   return (
-    <div className="bg-white p-6 rounded-lg shadow-md text-center">
-      <h4 className="text-sm text-gray-500">{title}</h4>
-      <p className="text-2xl font-bold text-indigo-600">{value}</p>
+    <div className="glass-dark p-6 rounded-xl text-center hover:scale-105 transition-all duration-300">
+      <h4 className="text-sm text-gray-300 mb-2">{title}</h4>
+      <p className="text-3xl font-bold gradient-text">{value}</p>
     </div>
   );
 }
