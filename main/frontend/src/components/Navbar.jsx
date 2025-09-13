@@ -9,7 +9,7 @@ export default function Navbar() {
           <span className="text-white font-bold text-lg">E</span>
         </div>
         <Link to="/" className="text-2xl font-bold gradient-text">
-          eventara
+          Eventara
         </Link>
         <p className="text-sm text-gray-300 ml-2">Innovate. Connect. Experience.</p>
       </div>
