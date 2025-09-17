@@ -8,6 +8,14 @@ export default function AttendeePortal() {
   const [registeredEvents, setRegisteredEvents] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [favorites, setFavorites] = useState([]);
+  const [filters, setFilters] = useState({
+    dateFrom: '',
+    dateTo: '',
+    priceMin: '',
+    priceMax: '',
+    location: ''
+  });
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [registrationForm, setRegistrationForm] = useState({
@@ -22,6 +30,7 @@ export default function AttendeePortal() {
   useEffect(() => {
     const savedEvents = localStorage.getItem('organizerEvents');
     const savedRegistrations = localStorage.getItem('attendeeRegistrations');
+    const savedFavorites = localStorage.getItem('attendeeFavorites');
     
     if (savedEvents) {
       setEvents(JSON.parse(savedEvents));
@@ -29,12 +38,19 @@ export default function AttendeePortal() {
     if (savedRegistrations) {
       setRegisteredEvents(JSON.parse(savedRegistrations));
     }
+    if (savedFavorites) {
+      setFavorites(JSON.parse(savedFavorites));
+    }
   }, []);
 
   // Save registrations to localStorage
   useEffect(() => {
     localStorage.setItem('attendeeRegistrations', JSON.stringify(registeredEvents));
   }, [registeredEvents]);
+
+  useEffect(() => {
+    localStorage.setItem('attendeeFavorites', JSON.stringify(favorites));
+  }, [favorites]);
 
   const handleRegister = (event) => {
     setSelectedEvent(event);
@@ -79,17 +95,27 @@ export default function AttendeePortal() {
     setSelectedEvent(null);
   };
 
+  const toggleFavorite = (eventId) => {
+    setFavorites(prev => prev.includes(eventId) ? prev.filter(id => id !== eventId) : [...prev, eventId]);
+  };
+
   const handleCancelRegistration = (registrationId) => {
     if (window.confirm('Are you sure you want to cancel this registration?')) {
       const registration = registeredEvents.find(r => r.id === registrationId);
-      setRegisteredEvents(registeredEvents.filter(r => r.id !== registrationId));
+      const updatedRegistrations = registeredEvents.filter(r => r.id !== registrationId);
+      setRegisteredEvents(updatedRegistrations);
       
       // Update event registration count
-      setEvents(events.map(event => 
+      const updatedEvents = events.map(event => 
         event.id === registration.eventId 
           ? { ...event, registrations: Math.max(0, event.registrations - 1) }
           : event
-      ));
+      );
+      setEvents(updatedEvents);
+
+      // Persist changes to localStorage
+      localStorage.setItem('attendeeRegistrations', JSON.stringify(updatedRegistrations));
+      localStorage.setItem('organizerEvents', JSON.stringify(updatedEvents));
     }
   };
 
@@ -97,7 +123,13 @@ export default function AttendeePortal() {
     const matchesSearch = event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          event.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = selectedCategory === 'all' || event.category === selectedCategory;
-    return matchesSearch && matchesCategory && event.status === 'active';
+    const inDateFrom = !filters.dateFrom || (event.date && event.date >= filters.dateFrom);
+    const inDateTo = !filters.dateTo || (event.date && event.date <= filters.dateTo);
+    const price = parseFloat(event.price || 0);
+    const inPriceMin = filters.priceMin === '' || price >= parseFloat(filters.priceMin);
+    const inPriceMax = filters.priceMax === '' || price <= parseFloat(filters.priceMax);
+    const inLocation = !filters.location || (event.location || '').toLowerCase().includes(filters.location.toLowerCase());
+    return matchesSearch && matchesCategory && inDateFrom && inDateTo && inPriceMin && inPriceMax && inLocation && event.status === 'active';
   });
 
   const categories = ['all', 'hackathon', 'conference', 'workshop', 'webinar', 'meetup'];
@@ -142,7 +174,7 @@ export default function AttendeePortal() {
 
         {/* Tabs */}
         <div className="flex gap-4 mb-8">
-          {['discover', 'my-events', 'teams'].map((tab) => (
+          {['discover', 'my-events', 'favorites', 'teams'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -183,6 +215,13 @@ export default function AttendeePortal() {
                   ))}
                 </select>
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3 flex-1">
+                <input type="date" value={filters.dateFrom} onChange={(e)=>setFilters({...filters, dateFrom: e.target.value})} className="px-4 py-3 bg-black/30 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+                <input type="date" value={filters.dateTo} onChange={(e)=>setFilters({...filters, dateTo: e.target.value})} className="px-4 py-3 bg-black/30 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+                <input type="number" placeholder="Min $" value={filters.priceMin} onChange={(e)=>setFilters({...filters, priceMin: e.target.value})} className="px-4 py-3 bg-black/30 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+                <input type="number" placeholder="Max $" value={filters.priceMax} onChange={(e)=>setFilters({...filters, priceMax: e.target.value})} className="px-4 py-3 bg-black/30 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+                <input type="text" placeholder="Location" value={filters.location} onChange={(e)=>setFilters({...filters, location: e.target.value})} className="px-4 py-3 bg-black/30 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:border-green-500 focus:outline-none focus:ring-2 focus:ring-green-500/20" />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -190,8 +229,11 @@ export default function AttendeePortal() {
                 <div key={event.id} className="glass rounded-xl p-6 hover:scale-105 transition-all duration-300">
                   <div className="flex justify-between items-start mb-4">
                     <h3 className="text-lg font-bold text-white">{event.title}</h3>
-                    <div className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full">
-                      {event.category}
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => toggleFavorite(event.id)} className={`px-2 py-1 rounded-full text-xs ${favorites.includes(event.id) ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'}`}>{favorites.includes(event.id) ? '★' : '☆'}</button>
+                      <div className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs rounded-full">
+                        {event.category}
+                      </div>
                     </div>
                   </div>
                   <p className="text-gray-300 text-sm mb-4 line-clamp-2">{event.description}</p>
@@ -272,6 +314,50 @@ export default function AttendeePortal() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Favorites Tab */}
+        {activeTab === 'favorites' && (
+          <div className="glass-dark rounded-2xl p-8">
+            <h2 className="text-2xl font-bold text-white mb-6">Saved Events</h2>
+            {favorites.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">⭐</div>
+                <h3 className="text-xl font-semibold text-white mb-2">No favorites yet</h3>
+                <p className="text-gray-300 mb-6">Tap the star on events to save them here</p>
+                <button
+                  onClick={() => setActiveTab('discover')}
+                  className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-6 py-3 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all duration-300"
+                >
+                  Discover Events
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {events.filter(e => favorites.includes(e.id) && e.status === 'active').map(event => (
+                  <div key={event.id} className="glass rounded-xl p-6 hover:scale-105 transition-all duration-300">
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-lg font-bold text-white">{event.title}</h3>
+                      <button onClick={() => toggleFavorite(event.id)} className="px-2 py-1 rounded-full text-xs bg-yellow-500/20 text-yellow-400">Remove ★</button>
+                    </div>
+                    <p className="text-gray-300 text-sm mb-4 line-clamp-2">{event.description}</p>
+                    <div className="space-y-2 mb-4 text-sm text-gray-400">
+                      <div>📅 {event.date} at {event.time}</div>
+                      <div>📍 {event.location}</div>
+                      <div>👥 {event.registrations}/{event.capacity} registered</div>
+                      <div>💰 ${event.price || 'Free'}</div>
+                    </div>
+                    <button
+                      onClick={() => handleRegister(event)}
+                      className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-2 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all duration-300 text-sm font-semibold"
+                    >
+                      Register Now
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>

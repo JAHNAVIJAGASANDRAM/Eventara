@@ -6,6 +6,8 @@ export default function OrganizerDashboard() {
   const [activeTab, setActiveTab] = useState('events');
   const [events, setEvents] = useState([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [attendeeRegistrations, setAttendeeRegistrations] = useState([]);
   const [newEvent, setNewEvent] = useState({
     title: '',
     description: '',
@@ -23,6 +25,10 @@ export default function OrganizerDashboard() {
     if (savedEvents) {
       setEvents(JSON.parse(savedEvents));
     }
+    const savedRegs = localStorage.getItem('attendeeRegistrations');
+    if (savedRegs) {
+      setAttendeeRegistrations(JSON.parse(savedRegs));
+    }
   }, []);
 
   // Save events to localStorage whenever events change
@@ -32,14 +38,24 @@ export default function OrganizerDashboard() {
 
   const handleCreateEvent = (e) => {
     e.preventDefault();
-    const event = {
-      id: Date.now(),
-      ...newEvent,
-      registrations: 0,
-      status: 'active',
-      createdAt: new Date().toISOString()
-    };
-    setEvents([...events, event]);
+    if (editingEventId) {
+      // Update existing event
+      setEvents(events.map(event =>
+        event.id === editingEventId
+          ? { ...event, ...newEvent }
+          : event
+      ));
+    } else {
+      // Create new event
+      const event = {
+        id: Date.now(),
+        ...newEvent,
+        registrations: 0,
+        status: 'active',
+        createdAt: new Date().toISOString()
+      };
+      setEvents([...events, event]);
+    }
     setNewEvent({
       title: '',
       description: '',
@@ -50,6 +66,7 @@ export default function OrganizerDashboard() {
       price: '',
       category: 'hackathon'
     });
+    setEditingEventId(null);
     setShowCreateForm(false);
   };
 
@@ -65,6 +82,58 @@ export default function OrganizerDashboard() {
         ? { ...event, status: event.status === 'active' ? 'inactive' : 'active' }
         : event
     ));
+  };
+
+  const handleOpenEditEvent = (event) => {
+    setNewEvent({
+      title: event.title || '',
+      description: event.description || '',
+      date: event.date || '',
+      time: event.time || '',
+      location: event.location || '',
+      capacity: event.capacity || '',
+      price: event.price || '',
+      category: event.category || 'hackathon'
+    });
+    setEditingEventId(event.id);
+    setShowCreateForm(true);
+  };
+
+  const handleDuplicateEvent = (event) => {
+    const clone = {
+      ...event,
+      id: Date.now(),
+      title: `${event.title} (Copy)`,
+      createdAt: new Date().toISOString(),
+      registrations: 0,
+      status: 'inactive'
+    };
+    setEvents([clone, ...events]);
+  };
+
+  const exportArrayToCsv = (rows, filename) => {
+    if (!rows || rows.length === 0) return;
+    const headers = Object.keys(rows[0]);
+    const csv = [headers.join(','), ...rows.map(r => headers.map(h => {
+      const v = r[h] ?? '';
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}` + '"' : s;
+    }).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportEvents = () => {
+    exportArrayToCsv(events, 'events.csv');
+  };
+
+  const handleExportAttendees = () => {
+    exportArrayToCsv(attendeeRegistrations, 'attendees.csv');
   };
 
   const totalEvents = events.length;
@@ -132,6 +201,10 @@ export default function OrganizerDashboard() {
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
+          <div className="ml-auto flex gap-3">
+            <button onClick={handleExportEvents} className="px-4 py-3 glass text-white rounded-lg hover:bg-white/20 transition-all duration-300">Export Events CSV</button>
+            <button onClick={handleExportAttendees} className="px-4 py-3 glass text-white rounded-lg hover:bg-white/20 transition-all duration-300">Export Attendees CSV</button>
+          </div>
         </div>
 
         {/* Events Tab */}
@@ -181,6 +254,18 @@ export default function OrganizerDashboard() {
                         }`}
                       >
                         {event.status === 'active' ? 'Deactivate' : 'Activate'}
+                      </button>
+                      <button
+                        onClick={() => handleOpenEditEvent(event)}
+                        className="px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-all duration-300"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDuplicateEvent(event)}
+                        className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-all duration-300"
+                      >
+                        Duplicate
                       </button>
                       <button
                         onClick={() => handleDeleteEvent(event.id)}
@@ -245,11 +330,62 @@ export default function OrganizerDashboard() {
         {activeTab === 'attendees' && (
           <div className="glass-dark rounded-2xl p-8">
             <h2 className="text-2xl font-bold text-white mb-6">Attendee Management</h2>
-            <div className="text-center py-12">
-              <div className="text-6xl mb-4">👥</div>
-              <h3 className="text-xl font-semibold text-white mb-2">Attendee Management</h3>
-              <p className="text-gray-300">This feature will show registered attendees for your events</p>
-            </div>
+            {events.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="text-6xl mb-4">📭</div>
+                <h3 className="text-xl font-semibold text-white mb-2">No events to show</h3>
+                <p className="text-gray-300">Create an event to manage attendees</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {events.map((event) => {
+                  const regs = attendeeRegistrations.filter(r => r.eventId === event.id);
+                  return (
+                    <div key={event.id} className="glass p-6 rounded-xl">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-lg font-bold text-white">{event.title}</h3>
+                          <p className="text-sm text-gray-400">{regs.length} attendee{regs.length !== 1 ? 's' : ''}</p>
+                        </div>
+                        <div className="text-sm text-gray-400">{event.date} • {event.time}</div>
+                      </div>
+                      {regs.length === 0 ? (
+                        <div className="text-gray-400 text-sm">No attendees registered yet.</div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-left text-sm">
+                            <thead className="text-gray-400">
+                              <tr>
+                                <th className="py-2 pr-4">Name</th>
+                                <th className="py-2 pr-4">Email</th>
+                                <th className="py-2 pr-4">Team</th>
+                                <th className="py-2 pr-4">Registered</th>
+                                <th className="py-2 pr-4">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="text-gray-200">
+                              {regs.map(r => (
+                                <tr key={r.id} className="border-t border-white/10">
+                                  <td className="py-2 pr-4">{r.name}</td>
+                                  <td className="py-2 pr-4">{r.email}</td>
+                                  <td className="py-2 pr-4">{r.teamName || '-'}</td>
+                                  <td className="py-2 pr-4">{new Date(r.registeredAt).toLocaleDateString()}</td>
+                                  <td className="py-2 pr-4">
+                                    <span className={`px-2 py-1 rounded-full text-xs ${r.status === 'confirmed' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                      {r.status}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -258,7 +394,7 @@ export default function OrganizerDashboard() {
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <div className="glass-dark rounded-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-white">Create New Event</h2>
+                <h2 className="text-2xl font-bold text-white">{editingEventId ? 'Edit Event' : 'Create New Event'}</h2>
                 <button 
                   onClick={() => setShowCreateForm(false)}
                   className="text-gray-400 hover:text-white text-2xl"
@@ -374,11 +510,11 @@ export default function OrganizerDashboard() {
                     type="submit"
                     className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-blue-600 hover:to-purple-700 transition-all duration-300 neon-blue"
                   >
-                    Create Event
+                    {editingEventId ? 'Save Changes' : 'Create Event'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowCreateForm(false)}
+                    onClick={() => { setShowCreateForm(false); setEditingEventId(null); }}
                     className="flex-1 glass text-white py-3 rounded-lg font-semibold hover:bg-white/20 transition-all duration-300"
                   >
                     Cancel
