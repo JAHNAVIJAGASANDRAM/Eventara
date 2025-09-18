@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function AttendeePortal() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('discover');
   const [events, setEvents] = useState([]);
   const [registeredEvents, setRegisteredEvents] = useState([]);
@@ -26,22 +29,42 @@ export default function AttendeePortal() {
     skills: ''
   });
 
-  // Load events and registrations from localStorage
+  // Load events and registrations (Supabase if available, else localStorage)
   useEffect(() => {
-    const savedEvents = localStorage.getItem('organizerEvents');
-    const savedRegistrations = localStorage.getItem('attendeeRegistrations');
-    const savedFavorites = localStorage.getItem('attendeeFavorites');
-    
-    if (savedEvents) {
-      setEvents(JSON.parse(savedEvents));
-    }
-    if (savedRegistrations) {
-      setRegisteredEvents(JSON.parse(savedRegistrations));
-    }
-    if (savedFavorites) {
-      setFavorites(JSON.parse(savedFavorites));
-    }
-  }, []);
+    const load = async () => {
+      const savedEvents = localStorage.getItem('organizerEvents');
+      if (savedEvents) setEvents(JSON.parse(savedEvents));
+
+      if (supabase && user) {
+        const { data, error } = await supabase
+          .from('registrations')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+        if (!error && data) {
+          setRegisteredEvents(data.map(r => ({
+            id: r.id,
+            eventId: r.event_id,
+            eventTitle: r.event_title || '',
+            name: r.name,
+            email: r.email,
+            phone: r.phone || '',
+            teamName: r.team_name || '',
+            skills: r.skills || '',
+            registeredAt: r.created_at,
+            status: r.status,
+          })));
+        }
+      } else {
+        const savedRegistrations = localStorage.getItem('attendeeRegistrations');
+        if (savedRegistrations) setRegisteredEvents(JSON.parse(savedRegistrations));
+      }
+
+      const savedFavorites = localStorage.getItem('attendeeFavorites');
+      if (savedFavorites) setFavorites(JSON.parse(savedFavorites));
+    };
+    load();
+  }, [user]);
 
   // Save registrations to localStorage
   useEffect(() => {
@@ -57,41 +80,76 @@ export default function AttendeePortal() {
     setShowRegistrationModal(true);
   };
 
-  const handleSubmitRegistration = (e) => {
+  const handleSubmitRegistration = async (e) => {
     e.preventDefault();
-    const registration = {
-      id: Date.now(),
-      eventId: selectedEvent.id,
-      eventTitle: selectedEvent.title,
-      ...registrationForm,
-      registeredAt: new Date().toISOString(),
-      status: 'confirmed'
-    };
-    
-    setRegisteredEvents([...registeredEvents, registration]);
-    
-    // Update event registration count
-    setEvents(events.map(event => 
+    if (!selectedEvent) return;
+
+    if (supabase && user) {
+      const { data, error } = await supabase
+        .from('registrations')
+        .insert({
+          user_id: user.id,
+          event_id: selectedEvent.id,
+          event_title: selectedEvent.title,
+          name: registrationForm.name,
+          email: registrationForm.email,
+          phone: registrationForm.phone,
+          team_name: registrationForm.teamName,
+          skills: registrationForm.skills,
+          status: 'confirmed'
+        })
+        .select()
+        .single();
+      if (!error && data) {
+        setRegisteredEvents([...registeredEvents, {
+          id: data.id,
+          eventId: data.event_id,
+          eventTitle: data.event_title,
+          name: data.name,
+          email: data.email,
+          phone: data.phone,
+          teamName: data.team_name,
+          skills: data.skills,
+          registeredAt: data.created_at,
+          status: data.status,
+        }]);
+
+        // Also update the event's registrations count in Supabase
+        const { data: currentEvent } = await supabase
+          .from('events')
+          .select('registrations')
+          .eq('id', selectedEvent.id)
+          .single();
+        if (currentEvent) {
+          await supabase
+            .from('events')
+            .update({ registrations: (currentEvent.registrations || 0) + 1 })
+            .eq('id', selectedEvent.id);
+        }
+      }
+    } else {
+      const registration = {
+        id: Date.now(),
+        eventId: selectedEvent.id,
+        eventTitle: selectedEvent.title,
+        ...registrationForm,
+        registeredAt: new Date().toISOString(),
+        status: 'confirmed'
+      };
+      setRegisteredEvents([...registeredEvents, registration]);
+    }
+
+    // Update event registration count and mirror to localStorage
+    const updatedEvents = events.map(event => 
       event.id === selectedEvent.id 
         ? { ...event, registrations: event.registrations + 1 }
         : event
-    ));
-    
-    // Save updated events to localStorage
-    localStorage.setItem('organizerEvents', JSON.stringify(events.map(event => 
-      event.id === selectedEvent.id 
-        ? { ...event, registrations: event.registrations + 1 }
-        : event
-    )));
-    
+    );
+    setEvents(updatedEvents);
+    localStorage.setItem('organizerEvents', JSON.stringify(updatedEvents));
+
     setShowRegistrationModal(false);
-    setRegistrationForm({
-      name: '',
-      email: '',
-      phone: '',
-      teamName: '',
-      skills: ''
-    });
+    setRegistrationForm({ name: '', email: '', phone: '', teamName: '', skills: '' });
     setSelectedEvent(null);
   };
 
@@ -99,12 +157,30 @@ export default function AttendeePortal() {
     setFavorites(prev => prev.includes(eventId) ? prev.filter(id => id !== eventId) : [...prev, eventId]);
   };
 
-  const handleCancelRegistration = (registrationId) => {
+  const handleCancelRegistration = async (registrationId) => {
     if (window.confirm('Are you sure you want to cancel this registration?')) {
       const registration = registeredEvents.find(r => r.id === registrationId);
       const updatedRegistrations = registeredEvents.filter(r => r.id !== registrationId);
       setRegisteredEvents(updatedRegistrations);
-      
+
+      if (supabase && user) {
+        await supabase.from('registrations').delete().eq('id', registrationId).eq('user_id', user.id);
+        // Decrement event registrations count in Supabase
+        if (registration?.eventId) {
+          const { data: currentEvent } = await supabase
+            .from('events')
+            .select('registrations')
+            .eq('id', registration.eventId)
+            .single();
+          if (currentEvent) {
+            await supabase
+              .from('events')
+              .update({ registrations: Math.max(0, (currentEvent.registrations || 0) - 1) })
+              .eq('id', registration.eventId);
+          }
+        }
+      }
+
       // Update event registration count
       const updatedEvents = events.map(event => 
         event.id === registration.eventId 

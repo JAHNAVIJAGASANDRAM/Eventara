@@ -5,9 +5,8 @@ export default function RoleSelectionPage() {
   const navigate = useNavigate();
 
   const handleRoleSelection = (role) => {
-    // Store role in localStorage for persistence
     localStorage.setItem('userRole', role);
-    navigate(`/${role}`);
+    navigate(`/login?role=${role}`);
   };
 
   return (

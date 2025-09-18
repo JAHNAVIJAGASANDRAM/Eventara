@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function OrganizerDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('events');
   const [events, setEvents] = useState([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -19,24 +22,53 @@ export default function OrganizerDashboard() {
     category: 'hackathon'
   });
 
-  // Load events from localStorage on component mount
+  // Load events for current user from Supabase if configured, otherwise from localStorage
   useEffect(() => {
-    const savedEvents = localStorage.getItem('organizerEvents');
-    if (savedEvents) {
-      setEvents(JSON.parse(savedEvents));
-    }
-    const savedRegs = localStorage.getItem('attendeeRegistrations');
-    if (savedRegs) {
-      setAttendeeRegistrations(JSON.parse(savedRegs));
-    }
-  }, []);
+    const load = async () => {
+      // Always load attendee registrations from localStorage for now
+      const savedRegs = localStorage.getItem('attendeeRegistrations');
+      if (savedRegs) {
+        setAttendeeRegistrations(JSON.parse(savedRegs));
+      }
 
-  // Save events to localStorage whenever events change
+      // If Supabase isn't configured or user not logged in, fallback to localStorage
+      if (!supabase || !user) {
+        const savedEvents = localStorage.getItem('organizerEvents');
+        if (savedEvents) setEvents(JSON.parse(savedEvents));
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true });
+      if (!error && data) {
+        setEvents(data.map(row => ({
+          id: row.id,
+          title: row.title,
+          description: row.description,
+          date: row.date,
+          time: row.time,
+          location: row.location,
+          capacity: row.capacity,
+          price: row.price,
+          category: row.category,
+          status: row.status,
+          registrations: row.registrations || 0,
+          createdAt: row.created_at,
+        })));
+      }
+    };
+    load();
+  }, [user]);
+
+  // Always mirror to localStorage so attendee portal can read
   useEffect(() => {
     localStorage.setItem('organizerEvents', JSON.stringify(events));
   }, [events]);
 
-  const handleCreateEvent = (e) => {
+  const handleCreateEvent = async (e) => {
     e.preventDefault();
     if (editingEventId) {
       // Update existing event
@@ -45,16 +77,62 @@ export default function OrganizerDashboard() {
           ? { ...event, ...newEvent }
           : event
       ));
+
+      if (supabase && user) {
+        await supabase
+          .from('events')
+          .update({
+            title: newEvent.title,
+            description: newEvent.description,
+            date: newEvent.date,
+            time: newEvent.time,
+            location: newEvent.location,
+            capacity: newEvent.capacity,
+            price: newEvent.price,
+            category: newEvent.category,
+          })
+          .eq('id', editingEventId)
+          .eq('user_id', user.id);
+      }
     } else {
       // Create new event
-      const event = {
-        id: Date.now(),
-        ...newEvent,
-        registrations: 0,
-        status: 'active',
-        createdAt: new Date().toISOString()
-      };
-      setEvents([...events, event]);
+      if (supabase && user) {
+        const { data, error } = await supabase
+          .from('events')
+          .insert({
+            user_id: user.id,
+            title: newEvent.title,
+            description: newEvent.description,
+            date: newEvent.date,
+            time: newEvent.time,
+            location: newEvent.location,
+            capacity: newEvent.capacity,
+            price: newEvent.price,
+            category: newEvent.category,
+            status: 'active',
+            registrations: 0,
+          })
+          .select()
+          .single();
+        if (!error && data) {
+          setEvents([...events, {
+            id: data.id,
+            ...newEvent,
+            registrations: 0,
+            status: 'active',
+            createdAt: data.created_at,
+          }]);
+        }
+      } else {
+        const event = {
+          id: Date.now(),
+          ...newEvent,
+          registrations: 0,
+          status: 'active',
+          createdAt: new Date().toISOString()
+        };
+        setEvents([...events, event]);
+      }
     }
     setNewEvent({
       title: '',
@@ -70,18 +148,30 @@ export default function OrganizerDashboard() {
     setShowCreateForm(false);
   };
 
-  const handleDeleteEvent = (eventId) => {
+  const handleDeleteEvent = async (eventId) => {
     if (window.confirm('Are you sure you want to delete this event?')) {
       setEvents(events.filter(event => event.id !== eventId));
+      if (supabase && user) {
+        await supabase.from('events').delete().eq('id', eventId).eq('user_id', user.id);
+      }
     }
   };
 
-  const handleToggleEventStatus = (eventId) => {
-    setEvents(events.map(event => 
+  const handleToggleEventStatus = async (eventId) => {
+    const updated = events.map(event => 
       event.id === eventId 
         ? { ...event, status: event.status === 'active' ? 'inactive' : 'active' }
         : event
-    ));
+    );
+    setEvents(updated);
+    if (supabase && user) {
+      const current = updated.find(e => e.id === eventId);
+      await supabase
+        .from('events')
+        .update({ status: current?.status })
+        .eq('id', eventId)
+        .eq('user_id', user.id);
+    }
   };
 
   const handleOpenEditEvent = (event) => {
@@ -99,16 +189,39 @@ export default function OrganizerDashboard() {
     setShowCreateForm(true);
   };
 
-  const handleDuplicateEvent = (event) => {
-    const clone = {
-      ...event,
-      id: Date.now(),
-      title: `${event.title} (Copy)`,
-      createdAt: new Date().toISOString(),
-      registrations: 0,
-      status: 'inactive'
-    };
-    setEvents([clone, ...events]);
+  const handleDuplicateEvent = async (event) => {
+    if (supabase && user) {
+      const { data } = await supabase
+        .from('events')
+        .insert({
+          user_id: user.id,
+          title: `${event.title} (Copy)`,
+          description: event.description,
+          date: event.date,
+          time: event.time,
+          location: event.location,
+          capacity: event.capacity,
+          price: event.price,
+          category: event.category,
+          status: 'inactive',
+          registrations: 0,
+        })
+        .select()
+        .single();
+      if (data) {
+        setEvents([{ ...event, id: data.id, title: `${event.title} (Copy)`, registrations: 0, status: 'inactive', createdAt: data.created_at }, ...events]);
+      }
+    } else {
+      const clone = {
+        ...event,
+        id: Date.now(),
+        title: `${event.title} (Copy)`,
+        createdAt: new Date().toISOString(),
+        registrations: 0,
+        status: 'inactive'
+      };
+      setEvents([clone, ...events]);
+    }
   };
 
   const exportArrayToCsv = (rows, filename) => {
